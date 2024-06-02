@@ -1,91 +1,97 @@
 import os
+import yaml
+import copy
 import gymnasium as gym
 import gymnasium_robotics  # This registers Gymnasium-Robotics environments
 import argparse
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
+from stable_baselines3 import PPO, HerReplayBuffer
+from sb3_contrib import TQC
+#from sb3_contrib import TRPO
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecVideoRecorder, VecNormalize
+from sb3_contrib.common.wrappers import TimeFeatureWrapper
 import wandb
 from wandb.integration.sb3 import WandbCallback
-from stable_baselines3.common.logger import configure
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--visualize-episodes', type=int, help='Number of episodes to visualize for a limited debug run')
-parser.add_argument('--disable-logging', action='store_true', help='Disable WandB logging')
+parser.add_argument(
+    "--env-id",
+    type=str,
+    default="FetchPickAndPlace-v2",
+    help="The environment ID to train the agent on",
+)
+parser.add_argument(
+    "--visualize-episodes",
+    type=int,
+    help="Number of episodes to visualize for a limited debug run",
+)
+parser.add_argument(
+    "--disable-logging", action="store_true", help="Disable WandB logging"
+)
+parser.add_argument(
+    "--seed", type=int, default=0, help="Random seed for reproducibility"
+)
 args = parser.parse_args()
 
-config = {
-    "policy_type": "MultiInputPolicy",
-    "total_timesteps": 100000,
-    "env_name": "FetchPickAndPlace-v2",
-}
 
-# Define render_mode based on visualization argument
-render_mode = 'human' if args.visualize_episodes else None
+with open("hyperparam/rl-zoo.yml") as f:
+    hyperparams_dict = yaml.safe_load(f)
+    if args.env_id in list(hyperparams_dict.keys()):
+        hyperparams = hyperparams_dict[args.env_id].copy()
+    else:
+        raise ValueError(f"Hyperparameters not found for {args.env_id}")
 
-# Define your custom environment
-env_id = config['env_name']
-env = gym.make(env_id, render_mode=render_mode)
+env_config = hyperparams_dict[args.env_id]
+env_config.update({'env_id': args.env_id})
 
-if not args.disable_logging:
-    run = wandb.init(
+run = wandb.init(
     project="fetch-pick-and-place",
-    config=config,
+    config=env_config,
     sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
     monitor_gym=True,  # auto-upload the videos of agents playing the game
     save_code=True,  # optional
+    name=args.env_id + "_" + str(args.seed) + "_TRPO",
 )
 
-# Create the PPO model using MultiInputPolicy
-model = PPO('MultiInputPolicy', env, verbose=1, device='cuda')
+def make_env():
+    env = gym.make(args.env_id, render_mode = "rgb_array")
 
-# Create a folder for logs and checkpoints
-log_dir = "./logs/"
-os.makedirs(log_dir, exist_ok=True)
+    env = Monitor(env)  # record stats such as returns
+    env = TimeFeatureWrapper(env)
 
-# Configure TensorBoard logger
-new_logger = configure(log_dir, ["stdout", "tensorboard"])
+    return env
 
-# Set the new logger
-model.set_logger(new_logger)
+env = DummyVecEnv([make_env])
 
+normalize_kwargs = {"gamma": hyperparams["gamma"]}
 
-# Define evaluation and checkpoint callbacks
-eval_callback = EvalCallback(env, best_model_save_path=log_dir,
-                             log_path=log_dir, eval_freq=10000,
-                             deterministic=True, render=False)
+env = VecNormalize(env, **normalize_kwargs)
+# Get the env_wrapper hyperparam
 
-checkpoint_callback = CheckpointCallback(save_freq=10000, save_path=log_dir,
-                                         name_prefix='ppo_pick_place_checkpoint')
+env = VecVideoRecorder(env, f"videos/{args.env_id}_{args.seed}", record_video_trigger=lambda x: x % 200000 == 0, video_length=200)
 
-# Add WandB logging callback if logging is enabled
-callbacks = [eval_callback, checkpoint_callback]
-if not args.disable_logging:
-    callbacks.append(WandbCallback(
-                            gradient_save_freq=100,  # frequency to log gradients
-                            model_save_path=log_dir,  # path to save the model
-                            verbose=2,
-                            log="all"  # log all metrics
-                        ))
+hyperparams["policy_kwargs"] = eval(hyperparams["policy_kwargs"])
+hyperparams["replay_buffer_kwargs"] = eval(hyperparams["replay_buffer_kwargs"])
 
-# Check for visualization argument
-if args.visualize_episodes:
-    print(f"Running a limited debug visualization run for {args.visualize_episodes} episodes...")
-    obs, info = env.reset()
-    for _ in range(args.visualize_episodes):
-        env.render()
-        action, _ = model.predict(obs)
-        obs, reward, terminated, truncated, info = env.step(action)
-        if terminated or truncated:
-            obs, info = env.reset()
-else:
-    # Train the model with callbacks
-    total_timesteps = config['total_timesteps']
-    model.learn(total_timesteps=total_timesteps, callback=callbacks)
+n_timesteps = copy.deepcopy(hyperparams["n_timesteps"])
+del hyperparams["n_timesteps"]
 
-# Save the final model
-model.save("ppo_pick_place")
-env.close()
+model = TQC(env=env, replay_buffer_class=HerReplayBuffer, verbose=1,  seed=args.seed, device='cuda', tensorboard_log=f"runs/{args.env_id}_{args.seed}_1", **hyperparams) 
+# model = TRPO(env=env, verbose=1,  seed=args.seed, device='cuda', tensorboard_log=f"runs/{args.env_id}_{args.seed}_1", **hyperparams) 
+
+# tensorboard_log=f"runs/{run.id}",
+model.learn(
+    total_timesteps=n_timesteps,
+    callback=WandbCallback(
+        gradient_save_freq=200000,
+        model_save_freq=200000,
+        model_save_path=f"models/{args.env_id}",
+        verbose=2,
+    ),
+)
+run.finish()
