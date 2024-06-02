@@ -20,15 +20,15 @@ services:
     network_mode: host
     stdin_open: true
     tty: true
-    command: ["bash", "-c", "tensorboard --logdir=/logs --host=0.0.0.0 & poetry run python /app/robot_rl/train_robot.py"]
+    command: bash -c "tensorboard --logdir=/app/robot_rl/outputs --host=0.0.0.0 & poetry run python /app/robot_rl/train_robot.py"
 
   visualize-train:
     extends:
       service: train
-    command: ["poetry", "run", "python", "robot_rl/train_robot.py", "--visualize-episodes", "200", "--disable-logging"]
+    command: poetry run python robot_rl/train_robot.py visualize_episodes=200 disable_logging=True
 
   visualize-env:
     extends:
       service: train
-    command: ["poetry", "run", "python", "robot_rl/visualize_env.py"]
+    command: poetry run python robot_rl/visualize_env.py
   

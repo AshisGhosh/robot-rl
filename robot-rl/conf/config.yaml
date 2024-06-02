@@ -1,0 +1,12 @@
+defaults:
+  - hyperparams: rl-zoo
+
+disable_logging: false
+visualize_episodes: null
+
+env:
+  id: FetchPickAndPlace-v2
+  seed: 0
+
+paths:
+  base_output: outputs

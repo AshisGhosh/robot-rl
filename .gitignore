@@ -1,3 +1,2 @@
 .env
-robot-rl/logs
-robot-rl/wandb
+robot-rl/outputs
