@@ -38,7 +38,6 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-
 with open("hyperparam/rl-zoo.yml") as f:
     hyperparams_dict = yaml.safe_load(f)
     if args.env_id in list(hyperparams_dict.keys()):
@@ -49,17 +48,26 @@ with open("hyperparam/rl-zoo.yml") as f:
 env_config = hyperparams_dict[args.env_id]
 env_config.update({'env_id': args.env_id})
 
-run = wandb.init(
-    project="fetch-pick-and-place",
-    config=env_config,
-    sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
-    monitor_gym=True,  # auto-upload the videos of agents playing the game
-    save_code=True,  # optional
-    name=args.env_id + "_" + str(args.seed) + "_TRPO",
-)
+callback = None
+if not args.disable_logging:
+    run = wandb.init(
+        project="fetch-pick-and-place",
+        config=env_config,
+        sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+        monitor_gym=True,  # auto-upload the videos of agents playing the game
+        save_code=True,  # optional
+        name=args.env_id + "_" + str(args.seed) + "_TRPO",
+    )
+    callback = WandbCallback(
+        gradient_save_freq=200000,
+        model_save_freq=200000,
+        model_save_path=f"models/{args.env_id}",
+        verbose=2,
+    ),
 
 def make_env():
-    env = gym.make(args.env_id, render_mode = "rgb_array")
+    render_mode = "human" if args.visualize_episodes else None
+    env = gym.make(args.env_id, render_mode = render_mode)
 
     env = Monitor(env)  # record stats such as returns
     env = TimeFeatureWrapper(env)
@@ -85,13 +93,15 @@ model = TQC(env=env, replay_buffer_class=HerReplayBuffer, verbose=1,  seed=args.
 # model = TRPO(env=env, verbose=1,  seed=args.seed, device='cuda', tensorboard_log=f"runs/{args.env_id}_{args.seed}_1", **hyperparams) 
 
 # tensorboard_log=f"runs/{run.id}",
+
+if args.visualize_episodes:
+    print(f"Visualizing {args.visualize_episodes} episodes")
+    n_timesteps = args.visualize_episodes
+
 model.learn(
     total_timesteps=n_timesteps,
-    callback=WandbCallback(
-        gradient_save_freq=200000,
-        model_save_freq=200000,
-        model_save_path=f"models/{args.env_id}",
-        verbose=2,
-    ),
+    callback=callback,
 )
-run.finish()
+
+if not args.disable_logging:
+    run.finish()
