@@ -24,6 +24,8 @@ def main(cfg: DictConfig):
 
     callback = None
     if not cfg.disable_logging:
+        if cfg.dry_run:
+            os.environ["WANDB_MODE"] = "dryrun"
         run = wandb.init(
             project="fetch-pick-and-place",
             config=hyperparams,

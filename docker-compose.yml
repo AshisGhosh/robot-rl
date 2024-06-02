@@ -21,6 +21,11 @@ services:
     stdin_open: true
     tty: true
     command: bash -c "tensorboard --logdir=/app/robot_rl/outputs --host=0.0.0.0 & poetry run python /app/robot_rl/train_robot.py"
+  
+  train-dry-run:
+    extends:
+      service: train
+    command: poetry run python robot_rl/train_robot.py dry_run=True
 
   visualize-train:
     extends:

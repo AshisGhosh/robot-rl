@@ -6,6 +6,11 @@ train:
     docker compose up train --build
     xhost -
 
+train-dry-run:
+    xhost +
+    docker compose up train-dry-run --build
+    xhost -
+
 visualize-train:
     xhost +
     docker compose up visualize-train --build
