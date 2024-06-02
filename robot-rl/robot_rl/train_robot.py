@@ -8,6 +8,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecVideoRecorder, VecN
 from sb3_contrib.common.wrappers import TimeFeatureWrapper
 import wandb
 from wandb.integration.sb3 import WandbCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, CallbackList
 from dotenv import load_dotenv
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -15,7 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 load_dotenv()
 
 
-@hydra.main(version_base="1.2", config_path="../conf", config_name="config")
+@hydra.main(version_base="1.3", config_path="../conf", config_name="config")
 def main(cfg: DictConfig):
     output_dir = hydra.core.hydra_config.HydraConfig.get().run.dir
 
@@ -32,12 +33,18 @@ def main(cfg: DictConfig):
             name=f"{output_dir.split('/')[-2]}_{os.path.basename(output_dir)}",
             dir=output_dir,
         )
-        callback = WandbCallback(
-            gradient_save_freq=200000,
-            model_save_freq=200000,
-            model_save_path=os.path.join(output_dir, "models"),
+        wandb_callback = WandbCallback(
+            gradient_save_freq=cfg.save_freqs.gradient_save_freq,
+            model_save_freq=cfg.save_freqs.model_save_freq,
+            model_save_path=os.path.join(output_dir, "model"),
             verbose=2,
         )
+        checkpoint_callback = CheckpointCallback(
+            save_freq=cfg.save_freqs.checkpoint_save_freq,
+            save_path=os.path.join(output_dir, "checkpoints"),
+            name_prefix="model_checkpoint"
+        )
+        callback = CallbackList([wandb_callback, checkpoint_callback])
 
     def make_env():
         render_mode = "human" if cfg.visualize_episodes else "rgb_array"
@@ -53,7 +60,7 @@ def main(cfg: DictConfig):
         env = VecVideoRecorder(
             env,
             os.path.join(output_dir, "videos"),
-            record_video_trigger=lambda x: x % 200000 == 0,
+            record_video_trigger=lambda x: x % cfg.save_freqs.video_save_freq == 0,
             video_length=200,
         )
     else:

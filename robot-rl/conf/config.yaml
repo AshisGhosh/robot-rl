@@ -17,3 +17,9 @@ policy:
 
 paths:
   base_output: outputs
+
+save_freqs:
+  gradient_save_freq: 100000
+  model_save_freq: 100000
+  checkpoint_save_freq: 100000
+  video_save_freq: 100000
