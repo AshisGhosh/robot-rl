@@ -1,5 +1,4 @@
 import os
-import yaml
 import copy
 import gymnasium as gym
 from stable_baselines3 import PPO, HerReplayBuffer  # noqa: F401
@@ -12,24 +11,14 @@ from wandb.integration.sb3 import WandbCallback
 from dotenv import load_dotenv
 import hydra
 from omegaconf import DictConfig, OmegaConf
-from datetime import datetime
-from hydra.utils import get_original_cwd, to_absolute_path
 
 load_dotenv()
 
-def set_hydra_run_dir(base_output_dir, env_id, seed):
-    run_name = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_dir = os.path.join(base_output_dir, f"{run_name}_{env_id}_{seed}")
-    os.makedirs(output_dir, exist_ok=True)
-    os.environ['HYDRA_RUN_DIR'] = output_dir
-    return output_dir
-
-@hydra.main(config_path="../conf", config_name="config")
+@hydra.main(version_base="1.2", config_path="../conf", config_name="config")
 def main(cfg: DictConfig):
-    hyperparams = OmegaConf.to_container(cfg.hyperparams[cfg.env.id], resolve=True)
+    output_dir = hydra.core.hydra_config.HydraConfig.get().run.dir
 
-    # Set the run directory dynamically
-    output_dir = set_hydra_run_dir(to_absolute_path(cfg.paths.base_output), cfg.env.id, cfg.env.seed)
+    hyperparams = OmegaConf.to_container(cfg.hyperparams[cfg.env.id], resolve=True)
 
     callback = None
     if not cfg.disable_logging:
@@ -40,6 +29,7 @@ def main(cfg: DictConfig):
             monitor_gym=True,  # auto-upload the videos of agents playing the game
             save_code=True,  # optional
             name=f"{os.path.basename(output_dir)}",
+            dir=output_dir,
         )
         callback = WandbCallback(
             gradient_save_freq=200000,

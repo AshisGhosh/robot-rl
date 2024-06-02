@@ -1,12 +1,19 @@
 defaults:
   - hyperparams: rl-zoo
 
+hydra:
+  run:
+    dir: outputs/train/${now:%Y-%m-%d}/${now:%H-%M-%S}_${env.id}_${policy.name}
+
 disable_logging: false
 visualize_episodes: null
 
 env:
   id: FetchPickAndPlace-v2
   seed: 0
+
+policy:
+  name: tqc
 
 paths:
   base_output: outputs
