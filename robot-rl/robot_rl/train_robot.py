@@ -29,7 +29,7 @@ def main(cfg: DictConfig):
             sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
             monitor_gym=True,  # auto-upload the videos of agents playing the game
             save_code=True,  # optional
-            name=f"{os.path.basename(output_dir)}",
+            name=f"{output_dir.split('/')[-2]}_{os.path.basename(output_dir)}",
             dir=output_dir,
         )
         callback = WandbCallback(
