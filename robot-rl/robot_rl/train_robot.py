@@ -14,6 +14,7 @@ from omegaconf import DictConfig, OmegaConf
 
 load_dotenv()
 
+
 @hydra.main(version_base="1.2", config_path="../conf", config_name="config")
 def main(cfg: DictConfig):
     output_dir = hydra.core.hydra_config.HydraConfig.get().run.dir
@@ -57,12 +58,12 @@ def main(cfg: DictConfig):
         )
     else:
         env = make_env()
-    
+
     n_timesteps = hyperparams["n_timesteps"]
 
-    hyperparams = copy.deepcopy(hyperparams['tqc_policy'])
-    hyperparams['policy_kwargs'] = eval(hyperparams["policy_kwargs"])
-    hyperparams['replay_buffer_kwargs'] = eval(hyperparams["replay_buffer_kwargs"])
+    hyperparams = copy.deepcopy(hyperparams["tqc_policy"])
+    hyperparams["policy_kwargs"] = eval(hyperparams["policy_kwargs"])
+    hyperparams["replay_buffer_kwargs"] = eval(hyperparams["replay_buffer_kwargs"])
 
     model = TQC(
         env=env,
@@ -85,6 +86,7 @@ def main(cfg: DictConfig):
 
     if not cfg.disable_logging:
         run.finish()
+
 
 if __name__ == "__main__":
     main()
