@@ -16,6 +16,9 @@ visualize-env:
     docker compose up visualize-env --build
     xhost -
 
+make-owner:
+    sudo chown -R 1000:1000 .
+
 python-test:
     #!/usr/bin/env python3
     print("hello world")
