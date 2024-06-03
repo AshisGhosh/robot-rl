@@ -1,104 +1,94 @@
 import os
-import copy
-import gymnasium as gym
-from stable_baselines3 import PPO, HerReplayBuffer  # noqa: F401
-from sb3_contrib import TQC
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecVideoRecorder, VecNormalize
-from sb3_contrib.common.wrappers import TimeFeatureWrapper
-import wandb
-from wandb.integration.sb3 import WandbCallback
-from stable_baselines3.common.callbacks import CheckpointCallback, CallbackList
-from dotenv import load_dotenv
+import sys
+import subprocess
 import hydra
-from omegaconf import DictConfig, OmegaConf
-
-load_dotenv()
+from omegaconf import DictConfig
+import select
+from train_sb3 import train_sb3
 
 
 @hydra.main(version_base="1.3", config_path="../conf", config_name="config")
 def main(cfg: DictConfig):
     output_dir = hydra.core.hydra_config.HydraConfig.get().run.dir
 
-    hyperparams = OmegaConf.to_container(cfg.hyperparams[cfg.env.id], resolve=True)
+    if cfg.dry_run:
+        os.environ["WANDB_MODE"] = "dryrun"
 
-    callback = None
-    if not cfg.disable_logging:
-        if cfg.dry_run:
-            os.environ["WANDB_MODE"] = "dryrun"
-        run = wandb.init(
-            project="fetch-pick-and-place",
-            config=hyperparams,
-            sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
-            monitor_gym=True,  # auto-upload the videos of agents playing the game
-            save_code=True,  # optional
-            name=f"{output_dir.split('/')[-2]}_{os.path.basename(output_dir)}",
-            dir=output_dir,
-        )
-        wandb_callback = WandbCallback(
-            gradient_save_freq=cfg.save_freqs.gradient_save_freq,
-            model_save_freq=cfg.save_freqs.model_save_freq,
-            model_save_path=os.path.join(output_dir, "model"),
-            verbose=2,
-        )
-        checkpoint_callback = CheckpointCallback(
-            save_freq=cfg.save_freqs.checkpoint_save_freq,
-            save_path=os.path.join(output_dir, "checkpoints"),
-            name_prefix="model_checkpoint",
-            save_vecnormalize=True,
-        )
-        callback = CallbackList([wandb_callback, checkpoint_callback])
+    policy_library = cfg.policy.library
+    env_library = cfg.env.library
 
-    def make_env():
-        render_mode = "human" if cfg.visualize_episodes else "rgb_array"
-        env = gym.make(cfg.env.id, render_mode=render_mode)
-        env = Monitor(env)  # record stats such as returns
-        env = TimeFeatureWrapper(env)
-        return env
+    if policy_library == "maniskill" or env_library == "maniskill":
+        assert (
+            policy_library == env_library
+        ), "Policy and environment libraries must match if using maniskill"
+        # Run the training script with unbuffered output
+        command = [
+            sys.executable,
+            "-u",  # Add -u for unbuffered output
+            "robot_rl/maniskill_ppo.py",
+            f"--output_dir={output_dir}",
+            f"--env_id={cfg.env.id}",
+            f"--num_envs={cfg.env.num_envs}",
+            f"--update_epochs={cfg.env.update_epochs}",
+            f"--num_minibatches={cfg.env.num_minibatches}",
+            f"--total_timesteps={cfg.env.total_timesteps}",
+            f"--obs_mode={cfg.env.obs_mode}",
+            f"--control_mode={cfg.env.control_mode}",
+            f"--render_mode={cfg.env.render_mode}",
+            f"--sim_backend={cfg.env.sim_backend}",
+        ]
 
-    if not cfg.visualize_episodes:
-        env = DummyVecEnv([make_env])
-        normalize_kwargs = {"gamma": hyperparams["tqc_policy"]["gamma"]}
-        env = VecNormalize(env, **normalize_kwargs)
-        env = VecVideoRecorder(
-            env,
-            os.path.join(output_dir, "videos"),
-            record_video_trigger=lambda x: x % cfg.save_freqs.video_save_freq == 0,
-            video_length=200,
-        )
-    else:
-        env = make_env()
+        if not cfg.disable_logging:
+            command.append("--track")
 
-    n_timesteps = hyperparams["n_timesteps"]
+        try:
+            # Run the training script and stream the output in real-time
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
 
-    hyperparams = copy.deepcopy(hyperparams["tqc_policy"])
-    hyperparams["policy_kwargs"] = eval(hyperparams["policy_kwargs"])
-    hyperparams["replay_buffer_kwargs"] = eval(hyperparams["replay_buffer_kwargs"])
+            # Use select to monitor both stdout and stderr
+            while True:
+                reads = [process.stdout.fileno(), process.stderr.fileno()]
+                ret = select.select(reads, [], [])
 
-    model = TQC(
-        env=env,
-        replay_buffer_class=HerReplayBuffer,
-        verbose=1,
-        seed=cfg.env.seed,
-        device="cuda",
-        tensorboard_log=os.path.join(output_dir, "runs"),
-        **hyperparams,
-    )
+                for fd in ret[0]:
+                    if fd == process.stdout.fileno():
+                        output = process.stdout.readline()
+                        if output:
+                            print(output.strip())
+                    if fd == process.stderr.fileno():
+                        error_output = process.stderr.readline()
+                        if error_output:
+                            print(error_output.strip(), file=sys.stderr)
 
-    if cfg.visualize_episodes:
-        print(f"Visualizing {cfg.visualize_episodes} episodes")
-        n_timesteps = cfg.visualize_episodes
+                if process.poll() is not None:
+                    break
 
-    model.learn(
-        total_timesteps=n_timesteps,
-        callback=callback,
-    )
+            # Ensure all output is read
+            while True:
+                output = process.stdout.readline()
+                if output == "":
+                    break
+                print(output.strip())
 
-    if isinstance(env, VecNormalize):
-        env.save(os.path.join(output_dir, "model", "vecnormalize.pkl"))
+            while True:
+                error_output = process.stderr.readline()
+                if error_output == "":
+                    break
+                print(error_output.strip(), file=sys.stderr)
 
-    if not cfg.disable_logging:
-        run.finish()
+            # Wait for the process to finish and get the return code
+            return_code = process.wait()
+            if return_code != 0:
+                raise subprocess.CalledProcessError(return_code, command)
+
+        except subprocess.CalledProcessError as e:
+            # Handle errors in the called script
+            print(f"Error: {e}", file=sys.stderr)
+
+    if policy_library == "sb3":
+        train_sb3(cfg=cfg, output_dir=output_dir)
 
 
 if __name__ == "__main__":

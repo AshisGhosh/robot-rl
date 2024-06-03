@@ -1,7 +1,9 @@
 import gymnasium as gym
+import gymnasium_robotics  # noqa: F401
+import mani_skill.envs  # noqa: F401
 
 # Define your custom environment
-env_id = "FetchPickAndPlace-v2"
+env_id = "PickCube-v1"
 env = gym.make(env_id, render_mode="human")
 
 # Reset the environment

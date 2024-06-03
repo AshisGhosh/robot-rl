@@ -1,101 +1,96 @@
 import os
-import logging
-import gymnasium as gym
-from stable_baselines3 import PPO, HerReplayBuffer  # noqa: F401
-from sb3_contrib import TQC
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-from stable_baselines3.common.monitor import Monitor
-from sb3_contrib.common.wrappers import TimeFeatureWrapper
+import sys
+import subprocess
 import hydra
 from omegaconf import DictConfig
+import select
+from eval_sb3 import eval_sb3
+import logging
 
 
 @hydra.main(version_base="1.3", config_path="../conf", config_name="eval_config")
 def main(cfg: DictConfig):
-    # Set up logging
-    log_file = os.path.join(
-        hydra.core.hydra_config.HydraConfig.get().run.dir, "evaluation_log.txt"
-    )
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    logger = logging.getLogger()
-    file_handler = logging.FileHandler(log_file)
-    logger.addHandler(file_handler)
+    policy_library = cfg.policy.library
+    env_library = cfg.env.library
 
-    # Use the MODEL_PATH environment variable or config
-    model_path = os.getenv("MODEL_PATH", cfg.model_path)
-    visualize = cfg.visualize
+    if policy_library == "maniskill" or env_library == "maniskill":
+        output_dir = hydra.core.hydra_config.HydraConfig.get().run.dir
 
-    # Ensure the model path is valid
-    if not os.path.isfile(model_path):
-        raise ValueError(f"The specified model path {model_path} is not a valid file.")
+        assert (
+            policy_library == env_library
+        ), "Policy and environment libraries must match if using maniskill"
+        # Run the training script with unbuffered output
+        command = [
+            sys.executable,
+            "-u",  # Add -u for unbuffered output
+            "robot_rl/maniskill_ppo.py",
+            f"--output_dir={output_dir}",
+            "--evaluate",
+            f"--env_id={cfg.env.id}",
+            f"--checkpoint={cfg.model_path}",
+            "--num_eval_envs=1",
+            f"--num-eval-steps={cfg.env.num_eval_steps}",
+            f"--sim_backend={cfg.env.sim_backend}",
+            f"--render_mode={cfg.env.eval_render_mode}",
+            f"--shader={cfg.env.eval_shader}",
+        ]
 
-    # Derive the VecNormalize path from the model path
-    base_path = os.path.dirname(model_path)
-    model_name = os.path.basename(model_path)
+        try:
+            # Run the training script and stream the output in real-time
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
 
-    # Split the model_name to get the step part correctly
-    parts = model_name.split("_")
-    step_part = parts[-2] + "_" + parts[-1]  # e.g., "1000000_steps.zip"
-    vecnormalize_name = model_name.replace(
-        step_part, f"vecnormalize_{step_part.replace('.zip', '.pkl')}"
-    )
-    vecnormalize_path = os.path.join(base_path, vecnormalize_name)
+            # Use select to monitor both stdout and stderr
+            while True:
+                reads = [process.stdout.fileno(), process.stderr.fileno()]
+                ret = select.select(reads, [], [])
 
-    # Example:
-    # model_path: /path/to/model_checkpoint_1000000_steps.zip
-    # vecnormalize_path: /path/to/model_checkpoint_vecnormalize_1000000_steps.pkl
+                for fd in ret[0]:
+                    if fd == process.stdout.fileno():
+                        output = process.stdout.readline()
+                        if output:
+                            print(output.strip())
+                    if fd == process.stderr.fileno():
+                        error_output = process.stderr.readline()
+                        if error_output:
+                            print(error_output.strip(), file=sys.stderr)
 
-    def make_env():
-        render_mode = "human" if visualize else "rgb_array"
-        env = gym.make(cfg.env.id, render_mode=render_mode)
-        env = Monitor(env)  # record stats such as returns
-        env = TimeFeatureWrapper(env)
-        return env
+                if process.poll() is not None:
+                    break
 
-    env = DummyVecEnv([make_env])
+            # Ensure all output is read
+            while True:
+                output = process.stdout.readline()
+                if output == "":
+                    break
+                print(output.strip())
 
-    # Load the normalization stats if they exist
-    if os.path.exists(vecnormalize_path):
-        env = VecNormalize.load(vecnormalize_path, env)
-    env.training = False
-    env.norm_reward = False
+            while True:
+                error_output = process.stderr.readline()
+                if error_output == "":
+                    break
+                print(error_output.strip(), file=sys.stderr)
 
-    # Load the model
-    model = TQC.load(model_path, env=env)
+            # Wait for the process to finish and get the return code
+            return_code = process.wait()
+            if return_code != 0:
+                raise subprocess.CalledProcessError(return_code, command)
 
-    success_count = 0
-    total_steps = 0
+        except subprocess.CalledProcessError as e:
+            # Handle errors in the called script
+            print(f"Error: {e}", file=sys.stderr)
 
-    for episode in range(cfg.num_episodes):
-        obs = env.reset()
-        done = False
-        step_count = 0
-        episode_rewards = 0
-
-        while not done:
-            action, _states = model.predict(obs)
-            obs, reward, done, info = env.step(action)
-            episode_rewards += reward
-            step_count += 1
-
-            if visualize:
-                env.render()
-
-        total_steps += step_count
-        success = info[0].get("is_success", False)
-        if success:
-            success_count += 1
-
-        logger.info(
-            f"Episode {episode + 1}: Success: {success}, Steps: {step_count}, Total Reward: {episode_rewards}"
+    if policy_library == "sb3":
+        # Set up logging
+        log_file = os.path.join(
+            hydra.core.hydra_config.HydraConfig.get().run.dir, "evaluation_log.txt"
         )
-
-    env.close()
-
-    logger.info(
-        f"Evaluation Summary: {success_count}/{cfg.num_episodes} episodes successful."
-    )
-    logger.info(f"Average steps per episode: {total_steps / cfg.num_episodes:.2f}")
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        logger = logging.getLogger()
+        file_handler = logging.FileHandler(log_file)
+        logger.addHandler(file_handler)
+        eval_sb3(cfg=cfg, logger=logger)
 
 
 if __name__ == "__main__":

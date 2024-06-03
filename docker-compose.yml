@@ -9,13 +9,14 @@ services:
     volumes:
       - ./robot-rl:/app
       - /tmp/.X11-unix:/tmp/.X11-unix # Mount the X11 socket
+      - ~/.maniskill:/root/.maniskill
     env_file:
       - .env # Use the .env file
     environment:
       - DISPLAY=${DISPLAY} # Forward the display
       - XAUTHORITY=${XAUTHORITY} # Use XAUTHORITY
       - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NVIDIA_DRIVER_CAPABILITIES=all
     runtime: nvidia
     network_mode: host
     stdin_open: true
@@ -40,5 +41,9 @@ services:
   eval:
     extends:
       service: train
-    command: poetry run python robot_rl/eval_robot.py model_path=outputs/train/2024-06-02/19-24-43_FetchPickAndPlace-v2_tqc/checkpoints/model_checkpoint_1000000_steps.zip
+    command: poetry run python robot_rl/eval_robot.py model_path=outputs/train/2024-06-03/05-31-50_PickCube-v1_tqc/final_ckpt.pt
   
+  maniskill-demo:
+    extends:
+      service: train
+    command: poetry run python -m mani_skill.examples.demo_random_action --render-mode human  --shader rt-fast

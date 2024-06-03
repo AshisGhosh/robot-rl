@@ -1,5 +1,7 @@
 defaults:
   - hyperparams: rl-zoo
+  # - env: gymnasium_robotics
+  - env: maniskill
 
 hydra:
   run:
@@ -7,14 +9,11 @@ hydra:
 
 disable_logging: false
 visualize_episodes: null
-dry_run: false
-
-env:
-  id: FetchPickAndPlace-v2
-  seed: 0
+dry_run: false 
 
 policy:
-  name: tqc
+  library: maniskill
+  name: ppo
 
 paths:
   base_output: outputs

@@ -26,6 +26,11 @@ eval:
     docker compose up eval --build
     xhost -
 
+maniskill-demo:
+    xhost +
+    docker compose up maniskill-demo --build
+    xhost -
+
 make-owner:
     sudo chown -R 1000:1000 .
 

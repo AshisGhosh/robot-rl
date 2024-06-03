@@ -1,15 +1,15 @@
 defaults:
   - hyperparams: rl-zoo
+  # - env: gymnasium_robotics
+  - env: maniskill
 
 hydra:
   run:
     dir: outputs/eval/${now:%Y-%m-%d}/${now:%H-%M-%S}_${env.id}_${policy.name}
 
-env:
-  id: FetchPickAndPlace-v2
-
 policy:
-  name: tqc
+  library: maniskill
+  name: ppo
 
 model_path: path/to/your/model.zip  # Replace with your actual model path
 visualize: true  # Set to false to disable visualization

@@ -45,7 +45,13 @@ COPY ${APP_NAME}/pyproject.toml ${APP_NAME}/poetry.lock /app/
 
 RUN poetry install --no-root
 
-
+# Install ManiSkill dependencies
+RUN apt-get update && apt-get install -y \
+    libvulkan1 \
+    libglvnd-dev \
+    vulkan-tools \
+    vulkan-validationlayers \
+    && apt-get clean
 
 # Set the entry point to your training script
 CMD ["poetry", "run", "python", "robot_rl/train_robot.py"]
