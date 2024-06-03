@@ -37,3 +37,8 @@ services:
       service: train
     command: poetry run python robot_rl/visualize_env.py
   
+  eval:
+    extends:
+      service: train
+    command: poetry run python robot_rl/eval_robot.py model_path=outputs/train/2024-06-02/19-24-43_FetchPickAndPlace-v2_tqc/checkpoints/model_checkpoint_1000000_steps.zip
+  

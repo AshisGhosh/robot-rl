@@ -21,6 +21,11 @@ visualize-env:
     docker compose up visualize-env --build
     xhost -
 
+eval:
+    xhost +
+    docker compose up eval --build
+    xhost -
+
 make-owner:
     sudo chown -R 1000:1000 .
 

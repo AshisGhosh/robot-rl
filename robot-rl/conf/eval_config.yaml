@@ -1,0 +1,16 @@
+defaults:
+  - hyperparams: rl-zoo
+
+hydra:
+  run:
+    dir: outputs/eval/${now:%Y-%m-%d}/${now:%H-%M-%S}_${env.id}_${policy.name}
+
+env:
+  id: FetchPickAndPlace-v2
+
+policy:
+  name: tqc
+
+model_path: path/to/your/model.zip  # Replace with your actual model path
+visualize: true  # Set to false to disable visualization
+num_episodes: 10  # Number of episodes to evaluate
