@@ -44,7 +44,8 @@ def main(cfg: DictConfig):
         checkpoint_callback = CheckpointCallback(
             save_freq=cfg.save_freqs.checkpoint_save_freq,
             save_path=os.path.join(output_dir, "checkpoints"),
-            name_prefix="model_checkpoint"
+            name_prefix="model_checkpoint",
+            save_vecnormalize=True,
         )
         callback = CallbackList([wandb_callback, checkpoint_callback])
 
@@ -92,6 +93,9 @@ def main(cfg: DictConfig):
         total_timesteps=n_timesteps,
         callback=callback,
     )
+
+    if isinstance(env, VecNormalize):
+        env.save(os.path.join(output_dir, "model", "vecnormalize.pkl"))
 
     if not cfg.disable_logging:
         run.finish()
