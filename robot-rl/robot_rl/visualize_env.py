@@ -4,7 +4,8 @@ import gymnasium_robotics  # noqa: F401
 import mani_skill.envs  # noqa: F401
 import envs  # noqa: F401
 
-def visualize_env(env_id:str = "PickCube-v1") -> None:
+
+def visualize_env(env_id: str = "PickCube-v1") -> None:
     # Define your custom environment
     env = gym.make(env_id, render_mode="human")
 
@@ -28,5 +29,6 @@ def visualize_env(env_id:str = "PickCube-v1") -> None:
                 obs, info = env.reset()
     finally:
         env.close()
+
 
 tyro.cli(visualize_env)

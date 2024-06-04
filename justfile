@@ -1,9 +1,9 @@
 default:
     just -l
 
-train:
+train env_id="PickCube-v1":
     xhost +
-    docker compose up train --build
+    docker compose run train-dry-run poetry run python robot_rl/train_robot.py env.id={{env_id}}
     xhost -
 
 train-dry-run env_id="PickCube-v1":

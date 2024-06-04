@@ -1,7 +1,7 @@
 from typing import Any, Dict, Union
 import numpy as np
 import torch
-import mani_skill.envs.utils.randomization as randomization
+import mani_skill.envs.utils.randomization as randomization  # noqa: F401
 from mani_skill.agents.robots import Fetch, Panda, Xmate3Robotiq
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.sensors.camera import CameraConfig
@@ -12,7 +12,7 @@ from mani_skill.utils.scene_builder.table import TableSceneBuilder
 from mani_skill.utils.structs.pose import Pose
 
 
-@register_env("WipeEnv-v0", max_episode_steps=100)
+@register_env("WipeEnv-v0", max_episode_steps=50)
 class WipeEnv(BaseEnv):
     SUPPORTED_ROBOTS = ["panda", "xmate3_robotiq", "fetch"]
     agent: Union[Panda, Xmate3Robotiq, Fetch]
@@ -38,12 +38,12 @@ class WipeEnv(BaseEnv):
         self.table_scene.build()
 
         self.spot_grid = []
-        self.cleaned_spots = []
         grid_size = 5
-        spot_half_size = 0.01
 
         # Create tensors for the grid positions
-        i_indices = torch.arange(grid_size, device=self.device).repeat(grid_size, 1).T.flatten()
+        i_indices = (
+            torch.arange(grid_size, device=self.device).repeat(grid_size, 1).T.flatten()
+        )
         j_indices = torch.arange(grid_size, device=self.device).repeat(grid_size)
 
         # Calculate the x, y positions for the spots
@@ -52,76 +52,104 @@ class WipeEnv(BaseEnv):
         z_positions = torch.full((grid_size * grid_size,), 0.01, device=self.device)
 
         # Combine x, y, z positions into a single tensor
-        positions = torch.stack((x_positions, y_positions, z_positions), dim=1)
+        self.positions = torch.stack((x_positions, y_positions, z_positions), dim=1)
+        print(f"positions: {self.positions.shape}")
 
-        # Create quaternion tensor (no rotation)
-        quats = torch.tensor([[1, 0, 0, 0]], device=self.device).repeat(grid_size * grid_size, 1)
-
+        spot_half_size = 0.01
         for idx in range(grid_size * grid_size):
             spot = actors.build_box(
                 self.scene,
                 half_sizes=[spot_half_size, spot_half_size, 0.01],
                 color=[0.5, 0.5, 0.5, 1],
-                name=f"spot_{idx // grid_size}_{idx % grid_size}"
+                name=f"spot_{idx // grid_size}_{idx % grid_size}",
             )
-            pos = positions[idx].unsqueeze(0)
-            quat = quats[idx].unsqueeze(0)
-            spot.set_pose(Pose.create_from_pq(p=pos, q=quat))
+            # print(type(spot))
             self.spot_grid.append(spot)
-            self.cleaned_spots.append(False)
         self.grid_size = grid_size
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
+        # Setting poses need to be in the _intialize_episode method if using GPU
         with torch.device(self.device):
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
-            self.cleaned_spots = [False] * len(self.spot_grid)
+            for idx, spot in enumerate(self.spot_grid):
+                pos = self.positions[idx].unsqueeze(0)
+                quat = [1, 0, 0, 0]
+                spot.set_pose(Pose.create_from_pq(p=pos, q=quat))
+            self.cleaned_spots = torch.tensor(
+                [False] * len(self.spot_grid), device=self.device
+            ).repeat(b, 1)
 
     def _get_obs_extra(self, info: Dict):
         obs = dict(
             tcp_pose=self.agent.tcp.pose.raw_pose,
             spot_positions=torch.cat([spot.pose.p for spot in self.spot_grid], dim=1),
-            cleaned_spots=torch.tensor(self.cleaned_spots, device=self.device).unsqueeze(0),
+            # cleaned_spots=torch.tensor(self.cleaned_spots, device=self.device).unsqueeze(0),
         )
         return obs
 
     def evaluate(self):
         tcp_pose = self.agent.tcp.pose.p
+        new_cleaned_spots = torch.zeros(
+            self.cleaned_spots.shape, device=self.device, dtype=torch.bool
+        )
         for i, spot in enumerate(self.spot_grid):
             distance = torch.linalg.norm(tcp_pose - spot.pose.p, axis=1)
-            if distance <= 0.01:
-                self.cleaned_spots[i] = True
-        
+            within_distance = distance <= 0.02
+            new_cleaned_spots[:, i] = within_distance & ~self.cleaned_spots[:, i]
+            self.cleaned_spots[:, i] = within_distance | self.cleaned_spots[:, i]
+
         # Convert success to a tensor
-        success = torch.tensor(all(self.cleaned_spots), device=self.device)
+        success = torch.tensor(
+            [all(self.cleaned_spots[i]) for i in range(len(self.cleaned_spots))],
+            device=self.device,
+        )
         return {
             "success": success,
-            "cleaned_spots": self.cleaned_spots,
+            "new_cleaned_spots": new_cleaned_spots,
         }
 
     def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: Dict):
         tcp_pose = self.agent.tcp.pose.p  # Assuming this is a tensor with shape (3,)
-        rewards = []
+        reward_per_spot_array = []
 
         for i, spot in enumerate(self.spot_grid):
-            spot_pose = spot.pose.p  # Assuming this is a tensor with shape (3,)
-            distance = torch.linalg.norm(tcp_pose - spot_pose, dim=-1)  # Ensure correct dimension
-            reward = 1 - torch.tanh(5 * distance)
-            
-            if distance <= 0.01 and not self.cleaned_spots[i]:
-                self.cleaned_spots[i] = True
-                reward += 1  # Reward for cleaning a new spot
-            
-            rewards.append(reward)
-        
-        total_reward = torch.tensor(rewards).sum()  # Ensure rewards are summed correctly
-        
-        if all(self.cleaned_spots):
-            total_reward += 5  # Bonus for cleaning all spots
-        
-        return total_reward
+            reward_per_spot = torch.zeros(tcp_pose.shape[0], device=self.device)
+            reward_per_spot[info["new_cleaned_spots"][:, i]] += (
+                1  # Reward for cleaning a spot
+            )
+            reward_per_spot_array.append(reward_per_spot)
 
-    def compute_normalized_dense_reward(self, obs: Any, action: torch.Tensor, info: Dict):
+        reward = torch.sum(torch.stack(reward_per_spot_array), dim=0)
+
+        # reward for TCP being in bounds of the grid
+        height_buffer = 0.03
+        lower_bounds = torch.tensor(
+            [-0.08, -0.08, 0.01 + height_buffer], device=self.device
+        )
+        upper_bounds = torch.tensor([0.08, 0.08, 0.01], device=self.device)
+        center_bounds = (lower_bounds + upper_bounds) / 2
+        distances_sq = torch.sum((tcp_pose - center_bounds) ** 2, dim=1)
+
+        within_bounds = ((tcp_pose >= lower_bounds) & (tcp_pose <= upper_bounds)).all(
+            dim=1
+        )
+        reward_within_bounds = (
+            0.1  # Define the fixed reward for positions within the bounds
+        )
+
+        sigma = 0.04  # Adjust this value based on your requirements
+        gaussian_reward = torch.exp(-distances_sq / (2 * sigma**2))
+        outside_bounds_reward_factor = 0.5
+        gaussian_reward *= outside_bounds_reward_factor
+
+        reward += torch.where(within_bounds, reward_within_bounds, gaussian_reward)
+
+        reward[info["success"]] += 5
+
+        return reward
+
+    def compute_normalized_dense_reward(
+        self, obs: Any, action: torch.Tensor, info: Dict
+    ):
         return self.compute_dense_reward(obs=obs, action=action, info=info) / 5
-
-

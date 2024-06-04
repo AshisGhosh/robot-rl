@@ -5,10 +5,12 @@ obs_mode: state
 control_mode: pd_joint_delta_pos
 render_mode: rgb_array
 sim_backend: gpu
-num_envs: 1024
+num_envs: 8
+num_eval_envs: 8
 update_epochs: 8
 num_minibatches: 32
 total_timesteps: 10_000_000
-num_eval_steps: 100
+num_eval_steps: 50
+eval_freq: 25
 eval_render_mode: rgb_array
 eval_shader: default
