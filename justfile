@@ -6,9 +6,9 @@ train:
     docker compose up train --build
     xhost -
 
-train-dry-run:
+train-dry-run env_id="PickCube-v1":
     xhost +
-    docker compose up train-dry-run --build
+    docker compose run train-dry-run poetry run python robot_rl/train_robot.py dry_run=True env.id={{env_id}}
     xhost -
 
 visualize-train:
