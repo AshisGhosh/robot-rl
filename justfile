@@ -16,9 +16,9 @@ visualize-train:
     docker compose up visualize-train --build
     xhost -
 
-visualize-env:
+visualize-env env_id="PickCube-v1":
     xhost +
-    docker compose up visualize-env --build
+    docker compose run visualize-env poetry run python robot_rl/visualize_env.py --env_id {{env_id}}
     xhost -
 
 eval:
