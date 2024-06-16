@@ -79,52 +79,64 @@ class WipeEnv(BaseEnv):
             self.cleaned_spots = torch.tensor(
                 [False] * len(self.spot_grid), device=self.device
             ).repeat(b, 1)
-            self.previous_velocities = torch.zeros((b, 3), device=self.device)  # Initialize previous velocities
+            self.previous_velocities = torch.zeros(
+                (b, 3), device=self.device
+            )  # Initialize previous velocities
             self.internal_rewards = None
 
     def _get_obs_extra(self, info: Dict):
         tcp_pose = self.agent.tcp.pose.raw_pose  # (N, 7)
         tcp_velocity = self.agent.tcp.get_linear_velocity()  # (N, 3)
-        
+
         # Collect the positions of all spots in a batch: (G, N, 3)
-        spot_positions = torch.stack([spot.pose.p for spot in self.spot_grid], dim=0)  # (G, N, 3)
-        
+        spot_positions = torch.stack(
+            [spot.pose.p for spot in self.spot_grid], dim=0
+        )  # (G, N, 3)
+
         # Transpose to align with batch dimension: (N, G, 3)
         spot_positions = spot_positions.transpose(0, 1)  # (N, G, 3)
-        
+
         # Calculate the distances to each spot: (N, G)
-        distances_to_spots = torch.norm(tcp_pose[:, :3].unsqueeze(1) - spot_positions, dim=2)
-        
+        distances_to_spots = torch.norm(
+            tcp_pose[:, :3].unsqueeze(1) - spot_positions, dim=2
+        )
+
         # Calculate the distance to the nearest uncleaned spot for each environment in the batch: (N,)
-        distance_to_nearest_uncleaned_spot = torch.min(distances_to_spots * (~self.cleaned_spots).float(), dim=1)[0].unsqueeze(1)
-        
+        distance_to_nearest_uncleaned_spot = torch.min(
+            distances_to_spots * (~self.cleaned_spots).float(), dim=1
+        )[0].unsqueeze(1)
+
         # Cleaned spots: (N, G)
         cleaned_spots = self.cleaned_spots.float()
 
         # Concatenate all observations into a single 2D tensor per environment: (N, ?)
-        obs = torch.cat([
-            tcp_pose,  # (N, 7)
-            tcp_velocity,  # (N, 3)
-            distances_to_spots,  # (N, G)
-            distance_to_nearest_uncleaned_spot,  # (N, 1)
-            cleaned_spots  # (N, G)
-        ], dim=1)
+        obs = torch.cat(
+            [
+                tcp_pose,  # (N, 7)
+                tcp_velocity,  # (N, 3)
+                distances_to_spots,  # (N, G)
+                distance_to_nearest_uncleaned_spot,  # (N, 1)
+                cleaned_spots,  # (N, G)
+            ],
+            dim=1,
+        )
 
         return obs
 
     def clean_spot(self, env_idx, spot_idx):
-        '''
+        """
         Sets a new post for the spot to be far away.
-        '''
+        """
         spot = self.spot_grid[spot_idx]
         print(f"spot:{spot.shape}")
         print(f"spot pose: {spot.pose.p.shape}")
-        new_pose = Pose.create_from_pq(p=torch.tensor([10, 10, 10], device=self.device), q=[1, 0, 0, 0])
+        new_pose = Pose.create_from_pq(
+            p=torch.tensor([10, 10, 10], device=self.device), q=[1, 0, 0, 0]
+        )
         self.px.cuda_rigid_body_data.torch()[
-                    self._body_data_index[self.scene._reset_mask[self._scene_idxs]], :7
-                ] = new_pose
+            self._body_data_index[self.scene._reset_mask[self._scene_idxs]], :7
+        ] = new_pose
         # spot.set_pose(Pose.create_from_pq(p=torch.tensor([10, 10, 10], device=self.device), q=[1, 0, 0, 0]))
-
 
     def evaluate(self):
         tcp_pose = self.agent.tcp.pose.p
@@ -140,7 +152,7 @@ class WipeEnv(BaseEnv):
             spot_positions = spot.pose.p
             spot_positions[new_cleaned_spots[:, i], 2] = 99999
             spot.set_pose(Pose.create_from_pq(spot_positions))
-            
+
         self.scene.px.gpu_apply_rigid_dynamic_data()
         self.scene.px.gpu_fetch_rigid_dynamic_data()
 
@@ -155,36 +167,47 @@ class WipeEnv(BaseEnv):
             "new_cleaned_spots": new_cleaned_spots,
         }
 
-
     def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: Dict):
         tcp_pose = self.agent.tcp.pose.p
         tcp_orientation = self.agent.tcp.pose.q
 
         # 1. Reward for cleaning spots
         new_cleaned_spots = info["new_cleaned_spots"]
-        reward_for_cleaning = new_cleaned_spots.sum(dim=1).float() * 2.0  # Reward for each new spot cleaned
+        reward_for_cleaning = (
+            new_cleaned_spots.sum(dim=1).float() * 2.0
+        )  # Reward for each new spot cleaned
 
         # 2. Reward for maintaining TCP position within the grid bounds
         height_buffer = 0.05  # Apply height buffer to the upper bound
         lower_bounds = torch.tensor([-0.08, -0.08, 0.01], device=self.device)
-        upper_bounds = torch.tensor([0.08, 0.08, 0.01 + height_buffer], device=self.device)
+        upper_bounds = torch.tensor(
+            [0.08, 0.08, 0.01 + height_buffer], device=self.device
+        )
 
-        within_bounds = ((tcp_pose >= lower_bounds) & (tcp_pose <= upper_bounds)).all(dim=1)
-        reward_for_position = torch.where(within_bounds, 1.0, -0.5)  # Reward for staying in bounds, penalty for drifting out
+        within_bounds = ((tcp_pose >= lower_bounds) & (tcp_pose <= upper_bounds)).all(
+            dim=1
+        )
+        reward_for_position = torch.where(
+            within_bounds, 1.0, -0.5
+        )  # Reward for staying in bounds, penalty for drifting out
 
         # 3. Reward for maintaining the end effector in the desired orientation
         desired_orientation = torch.tensor([0, 1, 0, 0], device=self.device)
-        orientation_deviation = torch.sum((tcp_orientation - desired_orientation) ** 2, dim=1)
-        reward_for_orientation = torch.exp(-orientation_deviation / (2 * 0.48 ** 2)) * 0.2
+        orientation_deviation = torch.sum(
+            (tcp_orientation - desired_orientation) ** 2, dim=1
+        )
+        reward_for_orientation = torch.exp(-orientation_deviation / (2 * 0.48**2)) * 0.2
 
         # 4. Penalty for high acceleration (encourages smooth movements)
         tcp_velocity = self.agent.tcp.get_linear_velocity()
         acceleration = tcp_velocity - self.previous_velocities
         self.previous_velocities = tcp_velocity.clone()
-        penalty_for_acceleration = -torch.sum(acceleration ** 2, dim=1) * 0.005
+        penalty_for_acceleration = -torch.sum(acceleration**2, dim=1) * 0.005
 
         # 5. Efficiency reward (encourage minimizing steps)
-        efficiency_reward = -0.01 * self.elapsed_steps  # Small penalty per step to encourage task completion
+        efficiency_reward = (
+            -0.01 * self.elapsed_steps
+        )  # Small penalty per step to encourage task completion
 
         # Total reward
         reward = (
@@ -197,21 +220,24 @@ class WipeEnv(BaseEnv):
 
         # Log internal rewards for debugging
         if self.internal_rewards is None:
-            self.internal_rewards = torch.zeros((reward.shape[0], 5), device=self.device)
-        self.internal_rewards += torch.stack([
-            reward_for_cleaning, 
-            reward_for_position, 
-            reward_for_orientation, 
-            penalty_for_acceleration, 
-            efficiency_reward
-        ], dim=1)
-
+            self.internal_rewards = torch.zeros(
+                (reward.shape[0], 5), device=self.device
+            )
+        self.internal_rewards += torch.stack(
+            [
+                reward_for_cleaning,
+                reward_for_position,
+                reward_for_orientation,
+                penalty_for_acceleration,
+                efficiency_reward,
+            ],
+            dim=1,
+        )
 
         # Bonus for success
         reward[info["success"]] += 5.0
 
         return reward
-
 
     def compute_normalized_dense_reward(
         self, obs: Any, action: torch.Tensor, info: Dict
