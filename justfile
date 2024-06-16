@@ -1,12 +1,12 @@
 default:
     just -l
 
-train env_id="PickCube-v1":
+train env_id="WipeEnv-v0":
     xhost +
     docker compose run train-dry-run poetry run python robot_rl/train_robot.py env.id={{env_id}}
     xhost -
 
-train-dry-run env_id="PickCube-v1":
+train-dry-run env_id="WipeEnv-v0":
     xhost +
     docker compose run train-dry-run poetry run python robot_rl/train_robot.py dry_run=True env.id={{env_id}}
     xhost -
@@ -16,7 +16,7 @@ visualize-train:
     docker compose up visualize-train --build
     xhost -
 
-visualize-env env_id="PickCube-v1":
+visualize-env env_id="WipeEnv-v0":
     xhost +
     docker compose run visualize-env poetry run python robot_rl/visualize_env.py --env_id {{env_id}}
     xhost -

@@ -1,16 +1,18 @@
 library: maniskill
-id: PickCube-v1
+id: WipeEnv-v0
 
 obs_mode: state
-control_mode: pd_joint_delta_pos
+control_mode: pd_ee_delta_pose
 render_mode: rgb_array
 sim_backend: gpu
-num_envs: 8
+num_envs: 4096
+# num_envs: 32
 num_eval_envs: 8
 update_epochs: 8
 num_minibatches: 32
-total_timesteps: 10_000_000
-num_eval_steps: 50
+total_timesteps: 100_000_000
+num_eval_steps: 100
 eval_freq: 25
+# eval_freq: 5
 eval_render_mode: rgb_array
 eval_shader: default
